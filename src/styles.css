@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #eef2f6;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+@layer components {
+  .panel {
+    @apply border border-slate-300 bg-white shadow-sm;
+  }
+
+  .panel-title {
+    @apply flex items-center gap-2 border-b border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold uppercase text-slate-700;
+  }
+
+  .metric-label {
+    @apply text-[11px] font-medium uppercase text-slate-500;
+  }
+
+  .metric-value {
+    @apply mt-0.5 truncate text-sm font-semibold text-slate-900;
+  }
+}
