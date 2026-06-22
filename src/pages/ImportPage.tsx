@@ -1,7 +1,7 @@
 import { ChangeEvent, useRef, useState } from 'react';
-import { CheckCircle2, FileUp, Loader2, Upload, XCircle } from 'lucide-react';
+import { CalendarDays, CheckCircle2, FileUp, History, Loader2, Upload, XCircle } from 'lucide-react';
 import { InlineError, Panel } from '../components/ui';
-import { authApi, AuthSession } from '../lib/authApi';
+import { authApi, AuthSession, HistoricalSalesIngestionResult } from '../lib/authApi';
 
 type ImportResult = {
   batchId: string;
@@ -10,8 +10,73 @@ type ImportResult = {
   failedRows: number;
 };
 
+type HistoricalImportFailure = {
+  message: string;
+  rawMessage?: string;
+  failedChunk?: HistoricalSalesIngestionResult['failedChunk'];
+};
+
+function toDateInputValue(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultHistoricalRange() {
+  const to = new Date();
+  const from = new Date(to.getTime() - 364 * 24 * 60 * 60 * 1000);
+  return {
+    from: toDateInputValue(from),
+    to: toDateInputValue(to),
+  };
+}
+
+function inclusiveDayCount(from: string, to: string) {
+  if (!from || !to) return 0;
+  const fromDate = new Date(`${from}T00:00:00Z`);
+  const toDate = new Date(`${to}T00:00:00Z`);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || fromDate > toDate) return 0;
+  return Math.round((toDate.getTime() - fromDate.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function formatDateRangeLabel(from: string, to: string) {
+  const days = inclusiveDayCount(from, to);
+  return days > 0 ? `${days.toLocaleString()} days selected` : 'Select a valid date range';
+}
+
+function formatShortDate(value: string) {
+  return value.slice(0, 10);
+}
+
+function createHistoricalFailure(result: HistoricalSalesIngestionResult): HistoricalImportFailure {
+  return {
+    message: result.userMessage || 'Historical sales import could not be completed. No sales data was imported.',
+    rawMessage: result.errorMessage,
+    failedChunk: result.failedChunk,
+  };
+}
+
+function createHistoricalRequestFailure(err: any): HistoricalImportFailure {
+  const rawMessage = err?.response?.data?.message || err?.message;
+  const isMissingRoute =
+    typeof rawMessage === 'string' &&
+    rawMessage.includes('Cannot POST') &&
+    rawMessage.includes('/sku-dashboard/sync/linnworks/historical-sales');
+
+  if (isMissingRoute) {
+    return {
+      message: 'Historical sales import is not available on the deployed backend yet. Please redeploy the backend and try again.',
+      rawMessage,
+    };
+  }
+
+  return {
+    message: 'Historical sales import could not be completed. No sales data was imported.',
+    rawMessage,
+  };
+}
+
 export function ImportPage({ session }: { session: AuthSession }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const initialHistoricalRange = defaultHistoricalRange();
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
@@ -19,6 +84,11 @@ export function ImportPage({ session }: { session: AuthSession }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [historicalFrom, setHistoricalFrom] = useState(initialHistoricalRange.from);
+  const [historicalTo, setHistoricalTo] = useState(initialHistoricalRange.to);
+  const [historicalLoading, setHistoricalLoading] = useState(false);
+  const [historicalError, setHistoricalError] = useState<HistoricalImportFailure | null>(null);
+  const [historicalResult, setHistoricalResult] = useState<HistoricalSalesIngestionResult | null>(null);
 
   const readFile = (file: File) => {
     if (!file.name.toLowerCase().endsWith('.csv')) {
@@ -69,6 +139,29 @@ export function ImportPage({ session }: { session: AuthSession }) {
     setResult(null);
     setError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const importHistoricalSales = async () => {
+    setHistoricalLoading(true);
+    setHistoricalError(null);
+    setHistoricalResult(null);
+
+    try {
+      const response = await authApi.triggerHistoricalSalesIngestion(session.accessToken, {
+        fromDate: historicalFrom,
+        toDate: historicalTo,
+        chunkDays: 90,
+      });
+      if (response.data.status === 'FAILED') {
+        setHistoricalError(createHistoricalFailure(response.data));
+        return;
+      }
+      setHistoricalResult(response.data);
+    } catch (err: any) {
+      setHistoricalError(createHistoricalRequestFailure(err));
+    } finally {
+      setHistoricalLoading(false);
+    }
   };
 
   return (
@@ -208,6 +301,103 @@ export function ImportPage({ session }: { session: AuthSession }) {
           )}
         </Panel>
       )}
+
+      <Panel title="Historical Linnworks Sales">
+        <p className="mb-4 text-sm text-slate-500">
+          Import processed orders directly from Linnworks using 90-day API chunks, then write SKU quantities into sales metrics.
+        </p>
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs font-bold uppercase tracking-wide text-slate-400">
+                From
+                <span className="relative">
+                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="date"
+                    value={historicalFrom}
+                    max={historicalTo}
+                    onChange={(event) => setHistoricalFrom(event.target.value)}
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-emerald-600 focus:bg-white"
+                  />
+                </span>
+              </label>
+
+              <label className="grid gap-1 text-xs font-bold uppercase tracking-wide text-slate-400">
+                To
+                <span className="relative">
+                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="date"
+                    value={historicalTo}
+                    min={historicalFrom}
+                    max={toDateInputValue(new Date())}
+                    onChange={(event) => setHistoricalTo(event.target.value)}
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-emerald-600 focus:bg-white"
+                  />
+                </span>
+              </label>
+            </div>
+            <p className="mt-2 text-xs font-semibold text-slate-500">
+              {formatDateRangeLabel(historicalFrom, historicalTo)}
+            </p>
+          </div>
+
+          <button
+            onClick={importHistoricalSales}
+            disabled={historicalLoading || !historicalFrom || !historicalTo}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 text-sm font-black text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {historicalLoading ? (
+              <><Loader2 className="size-4 animate-spin" /> Importing…</>
+            ) : (
+              <><History className="size-4" /> Import Sales</>
+            )}
+          </button>
+        </div>
+
+        {historicalLoading && (
+          <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+            Paging processed orders and writing item metrics…
+          </p>
+        )}
+
+        {historicalError && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex items-start gap-2">
+              <XCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+              <div className="min-w-0">
+                <p className="font-bold">Historical sales import stopped</p>
+                <p className="mt-1">{historicalError.message}</p>
+                {historicalError.failedChunk && (
+                  <p className="mt-2 text-xs font-semibold text-amber-800">
+                    Failed window: {formatShortDate(historicalError.failedChunk.fromDate)} to {formatShortDate(historicalError.failedChunk.toDate)}, page {historicalError.failedChunk.pageNumber}.
+                  </p>
+                )}
+                {historicalError.rawMessage && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs font-bold text-amber-700">Technical details</summary>
+                    <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/70 p-3 text-xs text-amber-950">
+                      {historicalError.rawMessage}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {historicalResult && (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <StatCard label="Chunks" value={historicalResult.chunksProcessed.toLocaleString()} colour="slate" />
+            <StatCard label="Pages" value={historicalResult.pagesProcessed.toLocaleString()} colour="slate" />
+            <StatCard label="Orders" value={historicalResult.ordersProcessed.toLocaleString()} colour="emerald" />
+            <StatCard label="Item Rows" value={historicalResult.itemRowsProcessed.toLocaleString()} colour="emerald" />
+            <StatCard label="Metrics" value={historicalResult.metricsUpdated.toLocaleString()} colour="emerald" />
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }
