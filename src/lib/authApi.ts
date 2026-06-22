@@ -70,8 +70,41 @@ export type SyncResult = {
   updatedSkus: number;
   updatedStock: number;
   updatedListings: number;
+  updatedSalesMetrics?: number;
   syncedAt: string;
   durationMs: number;
+};
+
+export type HistoricalSalesIngestionPayload = {
+  fromDate?: string;
+  toDate?: string;
+  historyDays?: number;
+  chunkDays?: number;
+};
+
+export type HistoricalSalesIngestionResult = {
+  status: 'COMPLETED' | 'FAILED';
+  fromDate: string;
+  toDate: string;
+  chunkDays: number;
+  chunksProcessed: number;
+  pagesProcessed: number;
+  ordersProcessed: number;
+  itemRowsProcessed: number;
+  metricsUpdated: number;
+  skippedItemRows: number;
+  failedRows: number;
+  clearedMetrics: number;
+  syncedAt: string;
+  durationMs: number;
+  errorMessage?: string;
+  errorCode?: string;
+  failedChunk?: {
+    fromDate: string;
+    toDate: string;
+    pageNumber: number;
+  };
+  userMessage?: string;
 };
 
 export type InventoryAlertItem = {
@@ -464,6 +497,14 @@ export const authApi = {
       method: 'POST',
       token: accessToken,
       body: JSON.stringify({ queued: false }),
+    });
+  },
+
+  triggerHistoricalSalesIngestion(accessToken: string, payload: HistoricalSalesIngestionPayload = {}) {
+    return request<HistoricalSalesIngestionResult>('/sku-dashboard/sync/linnworks/historical-sales', {
+      method: 'POST',
+      token: accessToken,
+      body: JSON.stringify(payload),
     });
   },
 

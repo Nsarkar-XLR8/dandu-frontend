@@ -208,6 +208,7 @@ export function DashboardPage({ session, profile }: { session: AuthSession; prof
           <span>SKUs updated: <strong>{syncResult.updatedSkus}</strong></span>
           <span>Stock lines: <strong>{syncResult.updatedStock}</strong></span>
           <span>Listings: <strong>{syncResult.updatedListings}</strong></span>
+          {syncResult.updatedSalesMetrics != null && <span>Sales metrics: <strong>{syncResult.updatedSalesMetrics}</strong></span>}
           <span className="text-emerald-600">in {(syncResult.durationMs / 1000).toFixed(1)}s</span>
           <button onClick={() => setSyncResult(null)} className="ml-auto text-emerald-500 hover:text-emerald-700">✕</button>
         </div>
